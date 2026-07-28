@@ -1,9 +1,14 @@
 // server.js
-// WebSocket signaling server for Godot P2P (WebRTC) multiplayer.
+// WebSocket relay server for Godot multiplayer.
 // Deploy this on Render.com as a Web Service.
-// It ONLY relays room/lobby info and WebRTC handshake data
-// (offer / answer / ICE candidates). No game data ever passes through it —
-// once peers connect, everything goes directly P2P.
+//
+// There is no peer-to-peer connection here. Every player connects to this
+// server over WebSocket, and ALL game traffic is relayed through it:
+//   client -> server -> other client(s)
+// This avoids WebRTC/NAT traversal entirely, at the cost of the server
+// being on the path for every message (fine for turn-based / low-rate
+// games; for high-frequency real-time state you may want to throttle or
+// batch on the client before sending).
 
 const http = require('http');
 const WebSocket = require('ws');
@@ -14,7 +19,7 @@ const PORT = process.env.PORT || 10000;
 // Basic HTTP server so Render's health check gets a 200 response.
 const httpServer = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('Signaling server is running.\n');
+  res.end('Relay server is running.\n');
 });
 
 const wss = new WebSocket.Server({ server: httpServer });
@@ -29,7 +34,7 @@ function send(ws, msg) {
 wss.on('connection', (ws) => {
   // Each connection is a candidate player until it creates/joins a room.
   let roomCode = null;
-  let peerId = null;
+  let playerId = null;
 
   ws.on('message', (raw) => {
     let msg;
@@ -48,11 +53,11 @@ wss.on('connection', (ws) => {
           return;
         }
         roomCode = result.roomCode;
-        peerId = result.peerId;
+        playerId = result.playerId;
         send(ws, {
           type: 'room_created',
           roomCode,
-          peerId,
+          playerId,
           mode: result.mode,
           maxPlayers: result.maxPlayers,
         });
@@ -66,42 +71,57 @@ wss.on('connection', (ws) => {
           return;
         }
         roomCode = result.roomCode;
-        peerId = result.peerId;
+        playerId = result.playerId;
 
         send(ws, {
           type: 'room_joined',
           roomCode,
-          peerId,
+          playerId,
           mode: result.mode,
           maxPlayers: result.maxPlayers,
-          existingPeers: result.existingPeers, // [{peerId, playerName}, ...]
+          existingPlayers: result.existingPlayers, // [{playerId, playerName}, ...]
         });
 
-        // Tell every EXISTING peer that a new peer joined, so THEY create
-        // the WebRTC offer. The joiner never initiates — this avoids
-        // offer/answer collisions without needing any extra coordination.
-        roomManager.broadcastExcept(roomCode, peerId, {
-          type: 'peer_joined',
-          peerId,
+        // Tell every existing player that a new player joined.
+        roomManager.broadcastExcept(roomCode, playerId, {
+          type: 'player_joined',
+          playerId,
           playerName: msg.playerName || 'Player',
         });
         break;
       }
 
-      case 'signal': {
-        // Relay a WebRTC offer/answer/ICE candidate to a specific peer.
-        if (!roomCode || peerId === null) return;
-        roomManager.relaySignal(roomCode, peerId, msg.target, msg.data);
+      // Relay an arbitrary game-data payload to ONE specific player in the room.
+      // msg = { type: 'send', target: <playerId>, data: {...} }
+      case 'send': {
+        if (!roomCode || playerId === null) return;
+        roomManager.sendToPlayer(roomCode, msg.target, {
+          type: 'data',
+          from: playerId,
+          data: msg.data,
+        });
+        break;
+      }
+
+      // Relay an arbitrary game-data payload to every OTHER player in the room.
+      // msg = { type: 'broadcast', data: {...} }
+      case 'broadcast': {
+        if (!roomCode || playerId === null) return;
+        roomManager.broadcastExcept(roomCode, playerId, {
+          type: 'data',
+          from: playerId,
+          data: msg.data,
+        });
         break;
       }
 
       case 'leave_room': {
-        if (roomCode && peerId !== null) {
-          roomManager.removePeer(roomCode, peerId);
-          roomManager.broadcastExcept(roomCode, peerId, { type: 'peer_left', peerId });
+        if (roomCode && playerId !== null) {
+          roomManager.removePlayer(roomCode, playerId);
+          roomManager.broadcastExcept(roomCode, playerId, { type: 'player_left', playerId });
         }
         roomCode = null;
-        peerId = null;
+        playerId = null;
         break;
       }
 
@@ -111,13 +131,13 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
-    if (roomCode && peerId !== null) {
-      roomManager.removePeer(roomCode, peerId);
-      roomManager.broadcastExcept(roomCode, peerId, { type: 'peer_left', peerId });
+    if (roomCode && playerId !== null) {
+      roomManager.removePlayer(roomCode, playerId);
+      roomManager.broadcastExcept(roomCode, playerId, { type: 'player_left', playerId });
     }
   });
 });
 
 httpServer.listen(PORT, () => {
-  console.log(`Signaling server listening on port ${PORT}`);
+  console.log(`Relay server listening on port ${PORT}`);
 });
