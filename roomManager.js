@@ -1,8 +1,12 @@
 // roomManager.js
-// Tracks rooms (lobbies), their mode/capacity, and connected peers.
-// Assigns each peer a unique, ever-increasing integer ID per room
-// (required by Godot's WebRTCMultiplayerPeer, and used client-side as the
-// deterministic host-migration key: lowest connected ID = host).
+// Tracks rooms (lobbies), their mode/capacity, and connected players.
+// This is a plain relay architecture: the server itself forwards all
+// messages between players in a room. There is no WebRTC handshake and
+// no peer-to-peer connection — every message goes client -> server -> client(s).
+//
+// Each player still gets a unique, ever-increasing integer ID per room,
+// used to address messages to a specific player and to determine host
+// (lowest connected ID = host, if your game needs an authoritative host).
 
 const WebSocket = require('ws');
 
@@ -28,18 +32,18 @@ class Room {
     this.code = code;
     this.mode = mode;
     this.maxPlayers = MODE_CAPACITY[mode];
-    this.players = new Map(); // peerId -> { ws, playerName }
-    this.nextPeerId = 1;
+    this.players = new Map(); // playerId -> { ws, playerName }
+    this.nextPlayerId = 1;
   }
 
   addPlayer(playerName, ws) {
-    const peerId = this.nextPeerId++;
-    this.players.set(peerId, { ws, playerName });
-    return peerId;
+    const playerId = this.nextPlayerId++;
+    this.players.set(playerId, { ws, playerName });
+    return playerId;
   }
 
-  removePlayer(peerId) {
-    this.players.delete(peerId);
+  removePlayer(playerId) {
+    this.players.delete(playerId);
   }
 
   isFull() {
@@ -66,10 +70,10 @@ class RoomManager {
     } while (this.rooms.has(code));
 
     const room = new Room(code, mode);
-    const peerId = room.addPlayer(playerName, ws);
+    const playerId = room.addPlayer(playerName, ws);
     this.rooms.set(code, room);
 
-    return { ok: true, roomCode: code, peerId, mode, maxPlayers: room.maxPlayers };
+    return { ok: true, roomCode: code, playerId, mode, maxPlayers: room.maxPlayers };
   }
 
   joinRoom(roomCode, playerName, ws) {
@@ -77,48 +81,66 @@ class RoomManager {
     if (!room) return { ok: false, error: 'Room not found' };
     if (room.isFull()) return { ok: false, error: 'Room is full' };
 
-    const existingPeers = Array.from(room.players.entries()).map(([id, p]) => ({
-      peerId: id,
+    const existingPlayers = Array.from(room.players.entries()).map(([id, p]) => ({
+      playerId: id,
       playerName: p.playerName,
     }));
 
-    const peerId = room.addPlayer(playerName, ws);
+    const playerId = room.addPlayer(playerName, ws);
 
     return {
       ok: true,
       roomCode,
-      peerId,
+      playerId,
       mode: room.mode,
       maxPlayers: room.maxPlayers,
-      existingPeers,
+      existingPlayers,
     };
   }
 
-  removePeer(roomCode, peerId) {
+  removePlayer(roomCode, playerId) {
     const room = this.rooms.get(roomCode);
     if (!room) return;
-    room.removePlayer(peerId);
+    room.removePlayer(playerId);
     if (room.isEmpty()) {
       this.rooms.delete(roomCode);
     }
   }
 
-  relaySignal(roomCode, fromPeerId, targetPeerId, data) {
+  getRoom(roomCode) {
+    return this.rooms.get(roomCode);
+  }
+
+  // Send a message to one specific player in a room.
+  sendToPlayer(roomCode, targetPlayerId, msg) {
     const room = this.rooms.get(roomCode);
     if (!room) return;
-    const target = room.players.get(targetPeerId);
+    const target = room.players.get(targetPlayerId);
     if (!target) return;
     if (target.ws.readyState === WebSocket.OPEN) {
-      target.ws.send(JSON.stringify({ type: 'signal', from: fromPeerId, data }));
+      target.ws.send(JSON.stringify(msg));
     }
   }
 
-  broadcastExcept(roomCode, exceptPeerId, msg) {
+  // Send a message to every player in a room except one (e.g. the sender).
+  broadcastExcept(roomCode, exceptPlayerId, msg) {
     const room = this.rooms.get(roomCode);
     if (!room) return;
     const raw = JSON.stringify(msg);
     for (const [id, p] of room.players) {
-      if (id !== exceptPeerId && p.ws.readyState === WebSocket.OPEN) {
+      if (id !== exceptPlayerId && p.ws.readyState === WebSocket.OPEN) {
+        p.ws.send(raw);
+      }
+    }
+  }
+
+  // Send a message to every player in a room, including the sender.
+  broadcastAll(roomCode, msg) {
+    const room = this.rooms.get(roomCode);
+    if (!room) return;
+    const raw = JSON.stringify(msg);
+    for (const [, p] of room.players) {
+      if (p.ws.readyState === WebSocket.OPEN) {
         p.ws.send(raw);
       }
     }
