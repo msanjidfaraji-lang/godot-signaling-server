@@ -9,16 +9,24 @@
 // throttle or batch on the client before sending).
 //
 // Two ways to get into a room:
-//   1. Manual: create_room / join_room with a room code (unchanged).
+//   1. Manual: create_room / join_room with a room code, then the host
+//      sends start_match when ready (assigns map + teams; see below).
 //   2. Matchmaking: find_match with just a mode — the server queues the
 //      player and auto-creates/joins a room once enough players are
-//      waiting (see matchmakingManager.js). Quick-fill (FIFO) for now,
-//      structured so skill-based matching can be added later.
+//      waiting, assigning map + teams automatically (matchmakingManager.js).
+//      Quick-fill (FIFO) for now, structured so skill-based matching can
+//      be added later.
+//
+// This server now owns everything the old standalone GameServer.gd
+// (a Godot-hosted dedicated server) used to do — room/queue management,
+// map pool selection, and team assignment — so that script is no longer
+// needed and can be deleted from the Godot project.
 
 const http = require('http');
 const WebSocket = require('ws');
 const { RoomManager } = require('./roomManager');
 const { MatchmakingManager } = require('./matchmakingManager');
+const { pickMap, assignTeamsRoundRobin } = require('./gameModes');
 
 const PORT = process.env.PORT || 10000;
 
@@ -129,6 +137,27 @@ wss.on('connection', (ws) => {
       // Leave the matchmaking queue voluntarily (before a match is found).
       case 'cancel_matchmaking': {
         matchmakingManager.cancel(ws, 'cancelled_by_user');
+        break;
+      }
+
+      // Host-triggered start for a manually-created room: picks a map
+      // and assigns teams for whoever is currently in the room, then
+      // broadcasts it to everyone. (Matchmade rooms get this
+      // automatically the moment they fill — see matchmakingManager.js.)
+      // msg = { type: 'start_match' }
+      case 'start_match': {
+        if (!roomCode || playerId === null) return;
+        const room = roomManager.getRoom(roomCode);
+        if (!room) return;
+        const playerIds = Array.from(room.players.keys());
+        room.map = pickMap(room.mode);
+        room.teamMap = assignTeamsRoundRobin(room.mode, playerIds);
+        roomManager.broadcastAll(roomCode, {
+          type: 'match_started',
+          roomCode,
+          map: room.map,
+          teams: room.teamMap, // playerId -> teamIndex
+        });
         break;
       }
 
