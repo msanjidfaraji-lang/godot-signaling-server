@@ -5,16 +5,13 @@
 // Each player gets a unique, ever-increasing integer ID per room,
 // used to address messages to a specific player and to determine host
 // (lowest connected ID = host, if your game needs an authoritative host).
+//
+// Mode definitions (capacity, teams, maps) live in gameModes.js — shared
+// with matchmakingManager.js so manual rooms and matchmade rooms use the
+// exact same mode rules.
 
 const WebSocket = require('ws');
-
-const MODE_CAPACITY = {
-  '1v1': 2,
-  '2v2': 4,
-  '4v4': 8,
-  '6p': 6,
-  '8p': 8,
-};
+const { GAME_MODES } = require('./gameModes');
 
 function generateRoomCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous chars
@@ -29,9 +26,13 @@ class Room {
   constructor(code, mode) {
     this.code = code;
     this.mode = mode;
-    this.maxPlayers = MODE_CAPACITY[mode];
+    this.maxPlayers = GAME_MODES[mode].totalPlayers;
     this.players = new Map(); // playerId -> { ws, playerName }
     this.nextPlayerId = 1;
+    // Populated once a match actually starts — via matchmaking
+    // (matchmakingManager.js) or a manual 'start_match' (server.js).
+    this.map = null;
+    this.teamMap = null; // playerId -> teamIndex
   }
 
   addPlayer(playerName, ws) {
@@ -59,7 +60,7 @@ class RoomManager {
   }
 
   createRoom(mode, playerName, ws) {
-    if (!MODE_CAPACITY[mode]) {
+    if (!GAME_MODES[mode]) {
       return { ok: false, error: `Unknown mode: ${mode}` };
     }
     let code;
@@ -145,4 +146,4 @@ class RoomManager {
   }
 }
 
-module.exports = { RoomManager, MODE_CAPACITY };
+module.exports = { RoomManager };
