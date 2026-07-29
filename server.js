@@ -195,6 +195,15 @@ wss.on('connection', (ws) => {
         break;
       }
 
+      // Lightweight latency check — echoes back the timestamp unchanged
+      // so the client can compute round-trip time. Works even if the
+      // player isn't in a room yet.
+      // msg = { type: 'ping', t: <client timestamp ms> }
+      case 'ping': {
+        send(ws, { type: 'pong', t: msg.t });
+        break;
+      }
+
       default:
         send(ws, { type: 'error', message: `Unknown message type: ${msg.type}` });
     }
