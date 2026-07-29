@@ -17,7 +17,7 @@
 // matchmaking_cancelled with reason 'timeout' (client returns them to menu).
 
 const WebSocket = require('ws');
-const { MODE_CAPACITY } = require('./roomManager');
+const { GAME_MODES, assignTeams, pickMap } = require('./gameModes');
 
 const DEFAULT_RATING = 1000;
 const QUEUE_TIMEOUT_MS = 30000; // 30s waiting -> cancelled
@@ -44,7 +44,7 @@ class MatchmakingManager {
   // caller update its own per-connection bookkeeping (e.g. server.js's
   // roomCode/playerId closure vars) without polling.
   findMatch(ws, mode, playerName, rating = DEFAULT_RATING, onMatch = null) {
-    if (!MODE_CAPACITY[mode]) {
+    if (!GAME_MODES[mode]) {
       return { ok: false, error: `Unknown mode: ${mode}` };
     }
     this.cancel(ws, 'requeued');
@@ -90,7 +90,7 @@ class MatchmakingManager {
   }
 
   _tryFillMode(mode) {
-    const capacity = MODE_CAPACITY[mode];
+    const capacity = GAME_MODES[mode].totalPlayers;
     const queue = this.queues.get(mode);
     if (!queue) return;
 
@@ -123,6 +123,15 @@ class MatchmakingManager {
       playerName: p.playerName,
     }));
 
+    // Map + team assignment, ported from the old GameServer.gd's
+    // _start_match / _assign_teams. Room player IDs are guaranteed
+    // 1..capacity here (a fresh room, fully staffed by matchmaking), so
+    // block assignment (team = index / teamSize) works the same as it
+    // did there.
+    const playerIdsInOrder = roster.map((r) => r.playerId);
+    room.map = pickMap(mode);
+    room.teamMap = assignTeams(mode, playerIdsInOrder);
+
     // Room player IDs are assigned 1..capacity in the same order players
     // were added, which is the same order as `group` — so group[i] got
     // playerId i+1. This lets us notify each entry's own onMatch without
@@ -136,13 +145,16 @@ class MatchmakingManager {
         playerId: id,
         mode,
         maxPlayers: room.maxPlayers,
+        map: room.map,
+        team: room.teamMap[id],
+        teams: room.teamMap, // full playerId -> teamIndex mapping
         players: roster.filter((r) => r.playerId !== id),
       });
     });
   }
 
   _notifyQueueStatus(mode) {
-    const capacity = MODE_CAPACITY[mode];
+    const capacity = GAME_MODES[mode].totalPlayers;
     const queue = this.queues.get(mode) || [];
     queue.forEach((entry, idx) => {
       this._send(entry.ws, {
