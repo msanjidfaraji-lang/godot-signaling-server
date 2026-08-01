@@ -27,7 +27,7 @@ class Room {
     this.code = code;
     this.mode = mode;
     this.maxPlayers = GAME_MODES[mode].totalPlayers;
-    this.players = new Map(); // playerId -> { ws, playerName }
+    this.players = new Map(); // playerId -> { ws, playerName, characterId }
     this.nextPlayerId = 1;
     // Populated once a match actually starts — via matchmaking
     // (matchmakingManager.js) or a manual 'start_match' (server.js).
@@ -35,9 +35,9 @@ class Room {
     this.teamMap = null; // playerId -> teamIndex
   }
 
-  addPlayer(playerName, ws) {
+  addPlayer(playerName, characterId, ws) {
     const playerId = this.nextPlayerId++;
-    this.players.set(playerId, { ws, playerName });
+    this.players.set(playerId, { ws, playerName, characterId: characterId || '' });
     return playerId;
   }
 
@@ -59,7 +59,7 @@ class RoomManager {
     this.rooms = new Map(); // roomCode -> Room
   }
 
-  createRoom(mode, playerName, ws) {
+  createRoom(mode, playerName, characterId, ws) {
     if (!GAME_MODES[mode]) {
       return { ok: false, error: `Unknown mode: ${mode}` };
     }
@@ -69,13 +69,13 @@ class RoomManager {
     } while (this.rooms.has(code));
 
     const room = new Room(code, mode);
-    const playerId = room.addPlayer(playerName, ws);
+    const playerId = room.addPlayer(playerName, characterId, ws);
     this.rooms.set(code, room);
 
     return { ok: true, roomCode: code, playerId, mode, maxPlayers: room.maxPlayers };
   }
 
-  joinRoom(roomCode, playerName, ws) {
+  joinRoom(roomCode, playerName, characterId, ws) {
     const room = this.rooms.get(roomCode);
     if (!room) return { ok: false, error: 'Room not found' };
     if (room.isFull()) return { ok: false, error: 'Room is full' };
@@ -83,9 +83,10 @@ class RoomManager {
     const existingPlayers = Array.from(room.players.entries()).map(([id, p]) => ({
       playerId: id,
       playerName: p.playerName,
+      characterId: p.characterId,
     }));
 
-    const playerId = room.addPlayer(playerName, ws);
+    const playerId = room.addPlayer(playerName, characterId, ws);
 
     return {
       ok: true,
