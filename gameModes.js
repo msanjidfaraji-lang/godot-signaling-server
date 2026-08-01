@@ -9,16 +9,15 @@
 // (matching GameServer.gd's naming) instead of the old 6p / 8p — update
 // any client UI code that hardcodes those old mode strings.
 
-// NOTE: these must be full Godot res:// paths, not short keys — the client
-// calls ResourceLoader.load_threaded_request() directly on whatever string
-// is sent here. Adjust the folder/filenames below to match your actual
-// scene files under res://Scene/Map/.
+// NOTE: only res://Scene/Map/map_1.tscn currently exists in the project.
+// Every mode points at it for now — once more map scenes are added, list
+// their real res:// paths here per mode.
 const GAME_MODES = {
-  '1v1':   { totalPlayers: 2, teams: 2, maps: ['res://Scene/Map/duel_arena.tscn', 'res://Scene/Map/duel_canyon.tscn'] },
-  '2v2':   { totalPlayers: 4, teams: 2, maps: ['res://Scene/Map/small_valley.tscn', 'res://Scene/Map/twin_towers.tscn'] },
-  '4v4':   { totalPlayers: 8, teams: 2, maps: ['res://Scene/Map/big_base.tscn', 'res://Scene/Map/harbor.tscn'] },
-  'ffa_6': { totalPlayers: 6, teams: 6, maps: ['res://Scene/Map/ffa_island.tscn'] },
-  'ffa_8': { totalPlayers: 8, teams: 8, maps: ['res://Scene/Map/ffa_desert.tscn'] },
+  '1v1':   { totalPlayers: 2, teams: 2, maps: ['res://Scene/Map/map_1.tscn'] },
+  '2v2':   { totalPlayers: 4, teams: 2, maps: ['res://Scene/Map/map_1.tscn'] },
+  '4v4':   { totalPlayers: 8, teams: 2, maps: ['res://Scene/Map/map_1.tscn'] },
+  'ffa_6': { totalPlayers: 6, teams: 6, maps: ['res://Scene/Map/map_1.tscn'] },
+  'ffa_8': { totalPlayers: 8, teams: 8, maps: ['res://Scene/Map/map_1.tscn'] },
 };
 
 // Block assignment: first (totalPlayers/teams) joiners -> team 0, next
