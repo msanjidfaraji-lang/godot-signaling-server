@@ -63,7 +63,7 @@ wss.on('connection', (ws) => {
 
     switch (msg.type) {
       case 'create_room': {
-        const result = roomManager.createRoom(msg.mode, msg.playerName || 'Player', ws);
+        const result = roomManager.createRoom(msg.mode, msg.playerName || 'Player', msg.characterId || '', ws);
         if (!result.ok) {
           send(ws, { type: 'error', message: result.error });
           return;
@@ -81,7 +81,7 @@ wss.on('connection', (ws) => {
       }
 
       case 'join_room': {
-        const result = roomManager.joinRoom(msg.roomCode, msg.playerName || 'Player', ws);
+        const result = roomManager.joinRoom(msg.roomCode, msg.playerName || 'Player', msg.characterId || '', ws);
         if (!result.ok) {
           send(ws, { type: 'error', message: result.error });
           return;
@@ -95,7 +95,7 @@ wss.on('connection', (ws) => {
           playerId,
           mode: result.mode,
           maxPlayers: result.maxPlayers,
-          existingPlayers: result.existingPlayers, // [{playerId, playerName}, ...]
+          existingPlayers: result.existingPlayers, // [{playerId, playerName, characterId}, ...]
         });
 
         // Tell every existing player that a new player joined.
@@ -103,6 +103,7 @@ wss.on('connection', (ws) => {
           type: 'player_joined',
           playerId,
           playerName: msg.playerName || 'Player',
+          characterId: msg.characterId || '',
         });
         break;
       }
@@ -118,6 +119,7 @@ wss.on('connection', (ws) => {
           ws,
           msg.mode,
           msg.playerName || 'Player',
+          msg.characterId || '',
           msg.rating,
           (matchedRoomCode, matchedPlayerId) => {
             // Wires this connection into the same roomCode/playerId
