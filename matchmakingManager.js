@@ -43,7 +43,7 @@ class MatchmakingManager {
   // over the socket) the moment this connection gets matched — lets the
   // caller update its own per-connection bookkeeping (e.g. server.js's
   // roomCode/playerId closure vars) without polling.
-  findMatch(ws, mode, playerName, rating = DEFAULT_RATING, onMatch = null) {
+  findMatch(ws, mode, playerName, characterId = '', rating = DEFAULT_RATING, onMatch = null) {
     if (!GAME_MODES[mode]) {
       return { ok: false, error: `Unknown mode: ${mode}` };
     }
@@ -51,7 +51,7 @@ class MatchmakingManager {
 
     if (!this.queues.has(mode)) this.queues.set(mode, []);
     const queue = this.queues.get(mode);
-    queue.push({ ws, playerName: playerName || 'Player', rating, joinedAt: Date.now(), onMatch });
+    queue.push({ ws, playerName: playerName || 'Player', characterId: characterId || '', rating, joinedAt: Date.now(), onMatch });
 
     this._notifyQueueStatus(mode);
     this._tryFillMode(mode);
@@ -105,7 +105,7 @@ class MatchmakingManager {
   _createMatch(mode, group) {
     const rm = this.roomManager;
     const first = group[0];
-    const created = rm.createRoom(mode, first.playerName, first.ws);
+    const created = rm.createRoom(mode, first.playerName, first.characterId, first.ws);
     if (!created.ok) {
       // Shouldn't happen (mode validated on entry) but fail safe.
       group.forEach((e) => this._send(e.ws, { type: 'error', message: created.error }));
@@ -114,13 +114,14 @@ class MatchmakingManager {
     const roomCode = created.roomCode;
 
     for (let i = 1; i < group.length; i++) {
-      rm.joinRoom(roomCode, group[i].playerName, group[i].ws);
+      rm.joinRoom(roomCode, group[i].playerName, group[i].characterId, group[i].ws);
     }
 
     const room = rm.getRoom(roomCode);
     const roster = Array.from(room.players.entries()).map(([id, p]) => ({
       playerId: id,
       playerName: p.playerName,
+      characterId: p.characterId,
     }));
 
     // Map + team assignment, ported from the old GameServer.gd's
